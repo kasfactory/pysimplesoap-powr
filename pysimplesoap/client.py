@@ -369,7 +369,7 @@ class SoapClient(object):
         # call remote procedure
         response = self.call(method, *params)
         # parse results:
-        resp = response('Body', ns=soap_uri).children().unmarshall(type(output))
+        resp = response('Body', ns=soap_uri).children().unmarshall(output)
         return resp and list(resp.values())[0]  # pass Response tag children
 
     def wsdl_call_get_params(self, method, input, args, kwargs):
