@@ -6,12 +6,12 @@
 # version.
 #
 # This program is distributed in the hope that it will be useful, but
-# WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTIBILITY
+# WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
 # or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
 # for more details.
 
 """Pythonic XML Security Library implementation"""
-
+from __future__ import print_function
 import base64
 import hashlib
 import os
@@ -23,7 +23,7 @@ try:
     import lxml.etree
 except ImportError:
     lxml = None
-    
+
 # Features:
 #  * Uses M2Crypto and lxml (libxml2) but it is independent from libxmlsec1
 #  * Sign, Verify, Encrypt & Decrypt XML documents
@@ -95,6 +95,7 @@ KEY_INFO_X509_TMPL = """
 </KeyInfo>
 """
 
+
 def canonicalize(xml, c14n_exc=True):
     "Return the canonical (c14n) form of the xml document for hashing"
     # UTF8, normalization of line feeds/spaces, quoting, attribute ordering...
@@ -122,7 +123,7 @@ def rsa_sign(xml, ref_uri, private_key, password=None, cert=None, c14n_exc=True,
     # normalize the referenced xml (to compute the SHA1 hash)
     ref_xml = canonicalize(xml, c14n_exc)
     # create the signed xml normalized (with the referenced uri and hash value)
-    signed_info = sign_template % {'ref_uri': ref_uri, 
+    signed_info = sign_template % {'ref_uri': ref_uri,
                                    'digest_value': sha1_hash_digest(ref_xml)}
     signed_info = canonicalize(signed_info, c14n_exc)
     # Sign the SHA1 digest of the signed xml using RSA cipher
@@ -130,11 +131,11 @@ def rsa_sign(xml, ref_uri, private_key, password=None, cert=None, c14n_exc=True,
     signature = pkey.sign(hashlib.sha1(signed_info).digest())
     # build the mapping (placeholders) to create the final xml signed message
     return {
-            'ref_xml': ref_xml, 'ref_uri': ref_uri,
-            'signed_info': signed_info,
-            'signature_value': base64.b64encode(signature),
-            'key_info': key_info(pkey, cert, key_info_template),
-            }
+        'ref_xml': ref_xml, 'ref_uri': ref_uri,
+        'signed_info': signed_info,
+        'signature_value': base64.b64encode(signature),
+        'key_info': key_info(pkey, cert, key_info_template),
+    }
 
 
 def rsa_verify(xml, signature, key, c14n_exc=True):
@@ -168,7 +169,7 @@ def key_info(pkey, cert, key_info_template):
         'exponent': exponent,
         'issuer_name': x509.get_issuer().as_text() if x509 else "",
         'serial_number': x509.get_serial_number() if x509 else "",
-        }
+    }
 
 
 # Miscellaneous certificate utility functions:
@@ -203,15 +204,16 @@ def x509_verify(cacert, cert, binary=False):
 if __name__ == "__main__":
     # basic test of enveloping signature (the reference is a part of the xml)
     sample_xml = """<Object xmlns="http://www.w3.org/2000/09/xmldsig#" Id="object">data</Object>"""
-    print canonicalize(sample_xml)
+    output = canonicalize(sample_xml)
+    print(output)
     vars = rsa_sign(sample_xml, '#object', "no_encriptada.key", "password")
-    print SIGNED_TMPL % vars
+    print(SIGNED_TMPL % vars)
 
     # basic test of enveloped signature (the reference is the document itself)
     sample_xml = """<?xml version="1.0" encoding="UTF-8"?><Object>data%s</Object>"""
     vars = rsa_sign(sample_xml % "", '', "no_encriptada.key", "password",
                     sign_template=SIGN_ENV_TMPL, c14n_exc=False)
-    print sample_xml % (SIGNATURE_TMPL % vars)
+    print(sample_xml % (SIGNATURE_TMPL % vars))
 
     # basic signature verification:
     public_key = x509_extract_rsa_public_key(open("zunimercado.crt").read())

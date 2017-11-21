@@ -6,18 +6,17 @@
 # version.
 #
 # This program is distributed in the hope that it will be useful, but
-# WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTIBILITY
+# WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
 # or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
 # for more details.
 
 """Pythonic simple SOAP Server implementation"""
 
-
 from __future__ import unicode_literals
 import sys
+
 if sys.version > '3':
     unicode = str
-
 
 import datetime
 import sys
@@ -25,6 +24,7 @@ import logging
 import warnings
 import re
 import traceback
+
 try:
     from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
 except ImportError:
@@ -158,7 +158,7 @@ class SoapDispatcher(object):
                     _uri = request.attributes()[k].value
                     _ns_reversed[_uri] = _ns  # update with received alias
                     # Now we change 'external' and 'model' to the received forms i.e. 'ext' and 'mod'
-                # After that we know how the client has prefixed additional namespaces
+                    # After that we know how the client has prefixed additional namespaces
 
             ns = NS_RX.findall(xml)
             for k, v in ns:
@@ -171,7 +171,7 @@ class SoapDispatcher(object):
             method = request('Body', ns=soap_uri).children()(0)
             if action:
                 # method name = action
-                name = action[len(self.action)+1:-1]
+                name = action[len(self.action) + 1:-1]
                 prefix = self.prefix
             if not action or not name:
                 # method name = input message name
@@ -207,13 +207,13 @@ class SoapDispatcher(object):
             etype, evalue, etb = sys.exc_info()
             log.error(traceback.format_exc())
             if self.debug:
-                detail = ''.join(traceback.format_exception(etype, evalue, etb))
-                detail += '\n\nXML REQUEST\n\n' + xml
+                detail = u''.join(traceback.format_exception(etype, evalue, etb))
+                detail += u'\n\nXML REQUEST\n\n' + xml.decode('UTF-8')
             else:
                 detail = None
             fault.update({'faultcode': "%s.%s" % (soap_fault_code, etype.__name__),
-                     'faultstring': evalue,
-                     'detail': detail})
+                          'faultstring': evalue,
+                          'detail': detail})
 
         # build response message
         if not prefix:
@@ -222,7 +222,7 @@ class SoapDispatcher(object):
             xml = """<%(soap_ns)s:Envelope xmlns:%(soap_ns)s="%(soap_uri)s"
                        xmlns:%(prefix)s="%(namespace)s"/>"""
 
-        xml %= {    # a %= {} is a shortcut for a = a % {}
+        xml %= {  # a %= {} is a shortcut for a = a % {}
             'namespace': self.namespace,
             'prefix': prefix,
             'soap_ns': soap_ns,
@@ -235,7 +235,8 @@ class SoapDispatcher(object):
         # Change our namespace alias to that given by the client.
         # We put [('model', 'http://model.common.mt.moboperator'), ('external', 'http://external.mt.moboperator')]
         # mix it with {'http://external.mt.moboperator': 'ext', 'http://model.common.mt.moboperator': 'mod'}
-        mapping = dict(((k, _ns_reversed[v]) for k, v in self.namespaces.items()))  # Switch keys-values and change value
+        mapping = dict(
+            ((k, _ns_reversed[v]) for k, v in self.namespaces.items()))  # Switch keys-values and change value
         # and get {'model': u'mod', 'external': u'ext'}
 
         response = SimpleXMLElement(xml,
@@ -266,7 +267,7 @@ class SoapDispatcher(object):
                     types_ok = all([k in returns_types for k in ret.keys()])
                     if not types_ok:
                         warnings.warn("Return value doesn't match type structure: "
-                                     "%s vs %s" % (str(returns_types), str(ret)))
+                                      "%s vs %s" % (str(returns_types), str(ret)))
                 if not complex_type or not types_ok:
                     # backward compatibility for scalar and simple types
                     res.marshall(list(returns_types.keys())[0], ret, )
@@ -385,7 +386,7 @@ class SoapDispatcher(object):
                         parse_element(n, v.items(), complex=True)
                         t = "tns:%s" % n
                     else:
-                        raise TypeError("unknonw type v for marshalling" % str(v))
+                        raise TypeError("unknonw type %s for marshalling" % str(v))
                     e.add_attribute('type', t)
 
             parse_element("%s" % method, args and args.items())
@@ -446,7 +447,6 @@ class SoapDispatcher(object):
 
 
 class SOAPHandler(BaseHTTPRequestHandler):
-
     def do_GET(self):
         """User viewable help information and wsdl"""
         args = self.path[1:].split("?")
@@ -491,7 +491,6 @@ class SOAPHandler(BaseHTTPRequestHandler):
 
 
 class WSGISOAPHandler(object):
-
     def __init__(self, dispatcher):
         self.dispatcher = dispatcher
 
@@ -545,18 +544,22 @@ if __name__ == "__main__":
         trace=True, debug=True,
         ns=True)
 
+
     def adder(p, c, dt=None):
         """Add several values"""
         dt = dt + datetime.timedelta(365)
         return {'ab': p['a'] + p['b'], 'dd': c[0]['d'] + c[1]['d'], 'dt': dt}
 
+
     def dummy(in0):
         """Just return input"""
         return in0
 
+
     def echo(request):
         """Copy request->response (generic, any type)"""
         return request.value
+
 
     dispatcher.register_function(
         'Adder', adder,
@@ -588,12 +591,14 @@ if __name__ == "__main__":
     if '--wsgi-serve' in sys.argv:
         log.info("Starting wsgi server...")
         from wsgiref.simple_server import make_server
+
         application = WSGISOAPHandler(dispatcher)
         wsgid = make_server('', 8008, application)
         wsgid.serve_forever()
 
     if '--consume' in sys.argv:
         from .client import SoapClient
+
         client = SoapClient(
             location="http://localhost:8008/",
             action='http://localhost:8008/',  # SOAPAction
@@ -608,9 +613,10 @@ if __name__ == "__main__":
         result = response.AddResult
         log.info(int(result.ab))
         log.info(str(result.dd))
-        
+
     if '--consume-wsdl' in sys.argv:
         from .client import SoapClient
+
         client = SoapClient(
             wsdl="http://localhost:8008/",
         )

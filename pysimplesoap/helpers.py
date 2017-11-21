@@ -6,7 +6,7 @@
 # later version.
 #
 # This program is distributed in the hope that it will be useful, but
-# WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTIBILITY
+# WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
 # or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
 # for more details.
 
@@ -208,9 +208,9 @@ def process_element(elements, element_name, node, element_type, xsd_uri,
                                 # get the complext element:
                                 ref_type = "complexType"
                                 key = make_key(type_name, ref_type, fn_namespace)
-                                fn_complex = elements.setdefault(key, Struct())
+                                fn_complex = elements.setdefault(key, Struct(key))
                                 # create an indirect struct {type_name: ...}:
-                                fn_array = Struct()
+                                fn_array = Struct(key)
                                 fn_array[type_name] = fn_complex
                                 fn_array.namespaces[None] = fn_namespace   # set the default namespace
                                 fn_array.qualified = qualified
@@ -235,7 +235,7 @@ def process_element(elements, element_name, node, element_type, xsd_uri,
                 else:
                     ref_type = "element"
                 key = make_key(type_name, ref_type, fn_namespace)
-                fn = elements.setdefault(key, Struct())
+                fn = elements.setdefault(key, Struct(key))
 
             if e['maxOccurs'] == 'unbounded' or (uri == soapenc_uri and type_name == 'Array'):
                 # it's an array... TODO: compound arrays? and check ns uri!
@@ -245,9 +245,11 @@ def process_element(elements, element_name, node, element_type, xsd_uri,
                         # {'ClassName': [{'attr1': val1, 'attr2': val2}]
                         fn.array = True
                     else:
-                        # .NET style support (backward compatibility)
-                        # [{'ClassName': {'attr1': val1, 'attr2': val2}]
-                        struct.array = True
+                        # .NET style now matches Jetty style
+                        # {'ClassName': [{'attr1': val1, 'attr2': val2}]
+                        #fn.array = True
+                        #struct.array = True
+                        fn = [fn]
                 else:
                     if len(children) > 1 or dialect in ('jetty',):
                         # Jetty style support
@@ -283,11 +285,13 @@ def process_element(elements, element_name, node, element_type, xsd_uri,
         # add the processed element to the main dictionary (if not extension):
         if new_struct:
             key = make_key(element_name, element_type, namespace)
-            elements.setdefault(key, Struct()).update(struct)
+            elements.setdefault(key, Struct(key)).update(struct)
 
 
 def postprocess_element(elements, processed):
     """Fix unresolved references"""
+    #elements variable contains all eelements and complexTypes defined in http://www.w3.org/2001/XMLSchema
+
     # (elements referenced before its definition, thanks .net)
     # avoid already processed elements:
     if elements in processed:
@@ -303,14 +307,7 @@ def postprocess_element(elements, processed):
                     warnings.warn(unicode(e), RuntimeWarning)
             if v.refers_to:  # extension base?
                 if isinstance(v.refers_to, dict):
-                    for i, kk in enumerate(v.refers_to):
-                        # extend base -keep orginal order-
-                        if isinstance(v.refers_to, Struct):
-                            elements[k].insert(kk, v.refers_to[kk], i)
-                            # update namespace (avoid ArrayOfKeyValueOfanyTypeanyType)
-                            if isinstance(v.refers_to, Struct) and v.refers_to.namespaces and kk:
-                                elements[k].namespaces[kk] = v.refers_to.namespaces[kk]
-                                elements[k].references[kk] = v.refers_to.references[kk]
+                    extend_element(v, v.refers_to)
                     # clean the reference:
                     v.refers_to = None
                 else:  # "alias", just replace
@@ -324,6 +321,20 @@ def postprocess_element(elements, processed):
                     #if n != elements:  # TODO: fix recursive elements
                     postprocess_element(n, processed)
 
+def extend_element(element, base):
+    ''' Recursively extend the elemnet if it has an extension base.'''
+    ''' Recursion is needed if the extension base itself extends another element.'''
+    if isinstance(base, dict):
+        for i, kk in enumerate(base):
+            # extend base -keep orignal order-
+            if isinstance(base, Struct):
+                element.insert(kk, base[kk], i)
+                # update namespace (avoid ArrayOfKeyValueOfanyTypeanyType)
+                if isinstance(base, Struct) and base.namespaces and kk:
+                    element.namespaces[kk] = base.namespaces[kk]
+                    element.references[kk] = base.references[kk]
+        if base.refers_to:
+            extend_element(element, base.refers_to)
 
 def get_message(messages, message_name, part_name, parameter_order=None):
     if part_name:
@@ -446,8 +457,8 @@ def datetime_u(s):
         return _strptime(s, fmt)
     except ValueError:
         try:
-            # strip utc offset
-            if s[-3] == ":" and s[-6] in (' ', '-', '+'):
+            # strip zulu timezone suffix or utc offset
+            if s[-1] == "Z" or (s[-3] == ":" and s[-6] in (' ', '-', '+')):
                 try:
                     import iso8601
                     return iso8601.parse_date(s)
@@ -466,8 +477,8 @@ def datetime_u(s):
                 except ImportError:
                     pass
 
-                warnings.warn('removing unsupported UTC offset. Install `iso8601`, `isodate` or `python-dateutil` package to support it', RuntimeWarning)
-                s = s[:-6]
+                warnings.warn('removing unsupported "Z" suffix or UTC offset. Install `iso8601`, `isodate` or `python-dateutil` package to support it', RuntimeWarning)
+                s = s[:-1] if s[-1] == "Z" else s[:-6]
             # parse microseconds
             try:
                 return _strptime(s, fmt + ".%f")
@@ -502,6 +513,12 @@ class Alias(object):
     def __repr__(self):
         return "<alias '%s' for '%s'>" % (self.xml_type, self.py_type)
 
+    def __eq__(self, other):
+        return isinstance(other, Alias) and self.xml_type == other.xml_type
+
+    def __hash__(self):
+        return hash(self.xml_type)
+
 if sys.version > '3':
     long = Alias(int, 'long')
 byte = Alias(str, 'byte')
@@ -514,7 +531,7 @@ Time = datetime.time
 duration = Alias(str, 'duration')
 any_uri = Alias(str, 'anyURI')
 
-# Define convertion function (python type): xml schema type
+# Define conversion function (python type): xml schema type
 TYPE_MAP = {
     unicode: 'string',
     bool: 'boolean',
@@ -552,6 +569,10 @@ REVERSE_TYPE_MAP = dict([(v, k) for k, v in TYPE_MAP.items()])
 
 REVERSE_TYPE_MAP.update({
     'base64Binary': str,
+    'unsignedByte': byte,
+    'unsignedInt': int,
+    'unsignedLong': long,
+    'unsignedShort': short
 })
 
 # insert str here to avoid collision in REVERSE_TYPE_MAP (i.e. decoding errors)
@@ -562,7 +583,8 @@ if str not in TYPE_MAP:
 class Struct(dict):
     """Minimal ordered dictionary to represent elements (i.e. xsd:sequences)"""
 
-    def __init__(self):
+    def __init__(self, key=None):
+        self.key = key
         self.__keys = []
         self.array = False
         self.namespaces = {}     # key: element, value: namespace URI
@@ -595,6 +617,8 @@ class Struct(dict):
         return [(key, self[key]) for key in self.__keys]
 
     def update(self, other):
+        if isinstance(other, Struct) and other.key:
+            self.key = other.key
         for k, v in other.items():
             self[k] = v
         # do not change if we are an array but the other is not:
@@ -609,9 +633,15 @@ class Struct(dict):
 
     def copy(self):
         "Make a duplicate"
-        new = Struct()
+        new = Struct(self.key)
         new.update(self)
         return new
+
+    def __eq__(self, other):
+        return isinstance(other, Struct) and self.key == other.key and self.key != None
+
+    def __hash__(self):
+        return hash(self.key)
 
     def __str__(self):
         return "%s" % dict.__str__(self)

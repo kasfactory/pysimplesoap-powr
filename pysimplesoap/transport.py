@@ -6,7 +6,7 @@
 # version.
 #
 # This program is distributed in the hope that it will be useful, but
-# WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTIBILITY
+# WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
 # or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
 # for more details.
 
@@ -14,6 +14,7 @@
 
 
 import logging
+import ssl
 import sys
 try:
     import urllib2
@@ -63,10 +64,10 @@ try:
     import httplib2
     if sys.version > '3' and httplib2.__version__ <= "0.7.7":
         import http.client
-        # httplib2 workaround: check_hostname needs a SSL context with either 
+        # httplib2 workaround: check_hostname needs a SSL context with either
         #                      CERT_OPTIONAL or CERT_REQUIRED
         # see https://code.google.com/p/httplib2/issues/detail?id=173
-        orig__init__ = http.client.HTTPSConnection.__init__ 
+        orig__init__ = http.client.HTTPSConnection.__init__
         def fixer(self, host, port, key_file, cert_file, timeout, context,
                         check_hostname, *args, **kwargs):
             chk = kwargs.get('disable_ssl_certificate_validation', True) ^ True
@@ -83,14 +84,14 @@ else:
         _wrapper_name = 'httplib2'
 
         def __init__(self, timeout, proxy=None, cacert=None, sessions=False):
-#            httplib2.debuglevel=4 
+#            httplib2.debuglevel=4
             kwargs = {}
             if proxy:
                 import socks
                 kwargs['proxy_info'] = httplib2.ProxyInfo(proxy_type=socks.PROXY_TYPE_HTTP, **proxy)
                 log.info("using proxy %s" % proxy)
 
-            # set optional parameters according supported httplib2 version
+            # set optional parameters according to supported httplib2 version
             if httplib2.__version__ >= '0.3.0':
                 kwargs['timeout'] = timeout
             if httplib2.__version__ >= '0.7.0':
@@ -121,6 +122,7 @@ class urllib2Transport(TransportBase):
             raise RuntimeError('proxy is not supported with urllib2 transport')
         if cacert:
             raise RuntimeError('cacert is not support with urllib2 transport')
+        self.cacert = cacert
 
         self.request_opener = urllib2.urlopen
         if sessions:
@@ -131,8 +133,12 @@ class urllib2Transport(TransportBase):
 
     def request(self, url, method="GET", body=None, headers={}):
         req = urllib2.Request(url, body, headers)
+        if not self.cacert:
+            context = ssl.create_default_context()
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
         try:
-            f = self.request_opener(req, timeout=self._timeout)
+            f = self.request_opener(req, timeout=self._timeout, context=context)
             return f.info(), f.read()
         except urllib2.HTTPError as f:
             if f.code != 500:
@@ -191,7 +197,7 @@ else:
                 c.setopt(c.CAINFO, self.cacert)
             c.setopt(pycurl.SSL_VERIFYPEER, self.cacert and 1 or 0)
             c.setopt(pycurl.SSL_VERIFYHOST, self.cacert and 2 or 0)
-            c.setopt(pycurl.CONNECTTIMEOUT, self.timeout / 6)
+            c.setopt(pycurl.CONNECTTIMEOUT, self.timeout)
             c.setopt(pycurl.TIMEOUT, self.timeout)
             if method == 'POST':
                 c.setopt(pycurl.POST, 1)

@@ -6,7 +6,7 @@
 # version.
 #
 # This program is distributed in the hope that it will be useful, but
-# WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTIBILITY
+# WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
 # or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
 # for more details.
 
@@ -27,6 +27,7 @@ import logging
 import os
 import tempfile
 import warnings
+import xmltodict
 
 from . import __author__, __copyright__, __license__, __version__, TIMEOUT
 from .simplexml import SimpleXMLElement, TYPE_MAP, REVERSE_TYPE_MAP, Struct
@@ -80,7 +81,7 @@ class SoapClient(object):
                  sessions=False, soap_server=None, timeout=TIMEOUT,
                  http_headers=None, trace=False,
                  username=None, password=None,
-                 key_file=None, plugins=None,
+                 key_file=None, plugins=None, strict=True,
                  ):
         """
         :param http_headers: Additional HTTP Headers; example: {'Host': 'ipsec.example.com'}
@@ -94,6 +95,7 @@ class SoapClient(object):
         self.xml_request = self.xml_response = ''
         self.http_headers = http_headers or {}
         self.plugins = plugins or []
+        self.strict = strict
         # extract the base directory / url for wsdl relative imports:
         if wsdl and wsdl_basedir == '':
             # parse the wsdl url, strip the scheme and filename
@@ -163,11 +165,7 @@ class SoapClient(object):
             self.__xml = """<?xml version="1.0" encoding="UTF-8"?>
 <%(soap_ns)s:Envelope xmlns:%(soap_ns)s="%(soap_uri)s" xmlns:%(ns)s="%(namespace)s">
 <%(soap_ns)s:Header/>
-<%(soap_ns)s:Body>
-    <%(ns)s:%(method)s>
-    </%(ns)s:%(method)s>
-</%(soap_ns)s:Body>
-</%(soap_ns)s:Envelope>"""
+<%(soap_ns)s:Body><%(ns)s:%(method)s></%(ns)s:%(method)s></%(soap_ns)s:Body></%(soap_ns)s:Envelope>"""
 
         # parse wsdl url
         self.services = wsdl and self.wsdl_parse(wsdl, cache=cache)
@@ -176,7 +174,7 @@ class SoapClient(object):
     def __getattr__(self, attr):
         """Return a pseudo-method that can be called"""
         if not self.services:  # not using WSDL?
-            return lambda self=self, *args, **kwargs: self.call(attr, *args, **kwargs)
+            return lambda *args, **kwargs: self.call(attr, *args, **kwargs)
         else:  # using WSDL:
             return lambda *args, **kwargs: self.wsdl_call(attr, *args, **kwargs)
 
@@ -258,27 +256,8 @@ class SoapClient(object):
 
         self.xml_request = request.as_xml()
         self.xml_response = self.send(method, self.xml_request)
-        response = SimpleXMLElement(self.xml_response, namespace=self.namespace,
-                                    jetty=self.__soap_server in ('jetty',))
-        if self.exceptions and response("Fault", ns=list(soap_namespaces.values()), error=False):
-            detailXml = response("detail", ns=list(soap_namespaces.values()), error=False)
-            detail = None
 
-            if detailXml and detailXml.children():
-                operation = self.get_operation(method)
-                fault = operation['faults'][detailXml.children()[0].get_name()]
-                detail = detailXml.children()[0].unmarshall(fault, strict=False)
-
-            raise SoapFault(unicode(response.faultcode),
-                            unicode(response.faultstring),
-                            detail)
-
-        # do post-processing using plugins (i.e. WSSE signature verification)
-        for plugin in self.plugins:
-            plugin.postprocess(self, response, method, args, kwargs,
-                                     self.__headers, soap_uri)
-
-        return response
+        return self.xml_response
 
     def send(self, method, xml):
         """Send SOAP request using HTTP"""
@@ -295,8 +274,11 @@ class SoapClient(object):
         headers = {
             'Content-type': 'text/xml; charset="UTF-8"',
             'Content-length': str(len(xml)),
-            'SOAPAction': '"%s"' % soap_action
         }
+
+        if self.action is not None:
+            headers['SOAPAction'] = soap_action
+
         headers.update(self.http_headers)
         log.info("POST %s" % location)
         log.debug('\n'.join(["%s: %s" % (k, v) for k, v in headers.items()]))
@@ -368,9 +350,13 @@ class SoapClient(object):
 
         # call remote procedure
         response = self.call(method, *params)
-        # parse results:
-        resp = response('Body', ns=soap_uri).children().unmarshall(output)
-        return resp and list(resp.values())[0]  # pass Response tag children
+        # parse results to dict:
+        namespaces = {
+            'http://schemas.xmlsoap.org/soap/envelope/': None
+        }
+
+        resp = xmltodict.parse(response, process_namespaces=True, namespaces=namespaces)
+        return resp and list(resp.values())[0]
 
     def wsdl_call_get_params(self, method, input, args, kwargs):
         """Build params from input and args/kwargs"""
@@ -399,7 +385,7 @@ class SoapClient(object):
             valid, errors, warnings = self.wsdl_validate_params(input, all_args)
             if not valid:
                 raise ValueError('Invalid Args Structure. Errors: %s' % errors)
-            # sort and filter parameters acording wsdl input structure
+            # sort and filter parameters according to wsdl input structure
             tree = sort_dict(input, all_args)
             root = list(tree.values())[0]
             params = []
@@ -525,6 +511,7 @@ class SoapClient(object):
     xsi_uri = 'http://www.w3.org/2001/XMLSchema-instance'
 
     def _url_to_xml_tree(self, url, cache, force_download):
+        """Unmarshall the WSDL at the given url into a tree of SimpleXMLElement nodes"""
         # Open uri and read xml:
         xml = fetch(url, self.http, cache, force_download, self.wsdl_basedir, self.http_headers)
         # Parse WSDL XML:
@@ -534,7 +521,7 @@ class SoapClient(object):
         self.namespace = ""
         self.documentation = unicode(wsdl('documentation', error=False)) or ''
 
-        # some wsdl are splitted down in several files, join them:
+        # some wsdl are split down in several files, join them:
         imported_wsdls = {}
         for element in wsdl.children() or []:
             if element.get_local_name() in ('import'):
@@ -559,6 +546,7 @@ class SoapClient(object):
         return wsdl
 
     def _xml_tree_to_services(self, wsdl, cache, force_download):
+        """Convert SimpleXMLElement tree representation of the WSDL into pythonic objects"""
         # detect soap prefix and uri (xmlns attributes of <definitions>)
         xsd_ns = None
         soap_uris = {}
@@ -588,6 +576,18 @@ class SoapClient(object):
         global_namespaces = {None: self.namespace}
 
         # process current wsdl schema (if any, or many if imported):
+        # <wsdl:definitions>
+        #     <wsdl:types>
+        #         <xs:schema>
+        #             <xs:element>
+        #                 <xs:complexType>...</xs:complexType>
+        #                 or
+        #                 <xs:.../>
+        #             </xs:element>
+        #         </xs:schema>
+        #     </wsdl:types>
+        # </wsdl:definitions>
+
         for types in wsdl('types', error=False) or []:
             # avoid issue if schema is not given in the main WSDL file
             schemas = types('schema', ns=self.xsd_uri, error=False)
@@ -694,10 +694,10 @@ class SoapClient(object):
                 op = binding['operations'].setdefault(op_name, {})
                 op['name'] = op_name
                 op['style'] = op.get('style', style)
-                if action:
+                if action is not None:
                     op['action'] = action
 
-                # input and/or ouput can be not present!
+                # input and/or output can be not present!
                 input = operation_node('input', error=False)
                 body = input and input('body', ns=list(soap_uris.values()), error=False)
                 parts_input_body = body and body['parts'] or None
@@ -719,7 +719,7 @@ class SoapClient(object):
                         if hdr:
                             headers.update(hdr)
                         else:
-                            pass # not enought info to search the header message:
+                            pass # not enough info to search the header message:
                     op['input'] = get_message(messages, op['input_msg'], parts_input_body, op['parameter_order'])
                     op['header'] = headers
 
@@ -754,9 +754,9 @@ class SoapClient(object):
 
                 if 'fault_msgs' in op:
                     faults = op['faults'] = {}
-                    for name, msg in op['fault_msgs'].iteritems():
+                    for msg in op['fault_msgs'].values():
                         msg_obj = get_message(messages, msg, parts_output_body)
-                        tag_name = msg_obj.keys()[0]
+                        tag_name = list(msg_obj)[0]
                         faults[tag_name] = msg_obj
 
                 # useless? never used
