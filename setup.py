@@ -2,7 +2,13 @@
 
 from setuptools import setup
 
-from pysimplesoap import __version__, __author__, __author_email__, __license__
+"""PySimpleSOAP"""
+__author__ = "Mariano Reingart"
+__author_email__ = "reingart@gmail.com"
+__copyright__ = "Copyright (C) 2013 Mariano Reingart"
+__license__ = "LGPL 3.0"
+__version__ = "1.16"
+
 
 # in the transition, register both:
 for name in ('soap2py', 'PySimpleSOAP'):
@@ -15,7 +21,6 @@ for name in ('soap2py', 'PySimpleSOAP'):
         url='http://code.google.com/p/pysimplesoap',
         packages=['pysimplesoap'],
         license=__license__,
-        #    console=['client.py'],
         install_requires=[
           'xmltodict',
         ]
