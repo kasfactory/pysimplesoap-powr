@@ -21,6 +21,9 @@ for name in ('soap2py', 'PySimpleSOAP'):
         url='http://code.google.com/p/pysimplesoap',
         packages=['pysimplesoap'],
         license=__license__,
-    #    console=['client.py'],
+        #    console=['client.py'],
+        install_requires=[
+          'xmltodict',
+        ],
         cmdclass={"py2exe": build_installer},
     )
