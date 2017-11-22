@@ -1,12 +1,6 @@
 #!/usr/bin/env python
 
-import setuptools
-from distutils.core import setup
-try:
-    import py2exe
-    from nsis import build_installer
-except:
-    build_installer = None
+from setuptools import setup
 
 from pysimplesoap import __version__, __author__, __author_email__, __license__
 
@@ -24,6 +18,5 @@ for name in ('soap2py', 'PySimpleSOAP'):
         #    console=['client.py'],
         install_requires=[
           'xmltodict',
-        ],
-        cmdclass={"py2exe": build_installer},
+        ]
     )
